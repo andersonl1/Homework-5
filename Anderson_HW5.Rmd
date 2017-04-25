@@ -1,1 +1,252 @@
-# Homework-5
+---
+title: "Week 5"
+author: "Lindsay Anderson"
+date: "April 25, 2017"
+output: html_document
+---
+
+##Hometown Bank Term Deposit Study
+
+Hometown bank is looking to improve their share of the term deposit market by looking at the characteristics of their current customers that are term deposit subscribers. The data set that has been collected includes 40,000 rows of data about their customers including:
+- Age
+- Job
+- Marital status
+-Education level
+- Whether they have credit in default
+- Their average yearly balance
+- Whether they have a housing or personal loan
+- How the customer has been contacted
+- When they were contacted
+- The length of this contact
+- The number of days that have passed since the client was last contacted
+- The number of contacts performed before the current marketing campaign
+- The outcome of this marketing campaign
+- The target variable - whether they are a subscriber of a term deposit or not. 
+
+We have a target variable and it is binary - yes or no - so I will be applying multiple supervised learning techniques to detemrine the characteristics of customers that subscribe to term deposits. 
+
+## Looking at the Data
+
+```{r}
+setwd("C:/Users/clxa10/Desktop/Rockhurst/BIA6301")
+getwd()
+bank <-read.csv("bank-full.csv")
+str(bank)
+table(bank$y..category) #5289 of the customers are term deposit subscribers while 39922 are not
+summary(bank)
+```
+The target variable is shown in the summary above as y..category. There are 5,289 clients that are subscribed to a term deposit and 39,922 that are not. 
+
+## Logistic Regression
+
+The first supervised learning method that I am going to apply is Logistic Regression. This method works to estimate the probability of a yes value for clients subscribing to term deposits.
+
+```{r}
+bank.model <- glm(y..category~., data=bank, family=binomial()) #Fit a logistic regression
+summary(bank.model) 
+
+exp(cbind(Odds_Ratio=coef(bank.model)))
+```
+
+## Is the Logistic Regression Model Statistically Significant?
+
+```{r}
+anova(bank.model,test="Chisq") 
+
+```
+
+The residual deviance should be decreasing with each additional variable added. The variables that are not contributing to the model are job category, marital category, education category and default category. I will re-run the model without these variables to see if we can get a better model.
+
+##Logistic Regression with Modified Variables
+```{r}
+bank.model2 <- glm(y..category~age..number+housing..category+loan..category+contact..category+day..number+month..category+duration..number+campaign..number+pdays..number+previous..number+poutcome..category, data=bank, family=binomial()) #Fit a logistic regression
+summary(bank.model2) 
+
+exp(cbind(Odds_Ratio=coef(bank.model)))
+```
+The variables that are showing to not be statistically significant are pdays number and previous number. I will adjust the model again to remove these variables.
+
+##Third Logistic Model
+
+```{r}
+bank.model3 <- glm(y..category~age..number+housing..category+loan..category+contact..category+day..number+month..category+duration..number+campaign..number+poutcome..category, data=bank, family=binomial()) #Fit a logistic regression
+summary(bank.model3) 
+
+exp(cbind(Odds_Ratio=coef(bank.model3)))
+```
+The most important variable identified by the logistic regression model is the poutcome category of success. When the outcome of the prior marketing campaign is a success, the odds of the client subscribing to a term deposit are 10 times more likely than if the prior campaign was a failure. The next most important variable is the month in which the customers were contacted. Customers in March are nearly 6 times more likely to subscribe to a term deposit than those in April. 
+
+#Decision Tree Model
+## Creating a Training and Testing Set
+The logistic regression model points out many variables that may affect a client's decision to subscribe to a term deposit. An easier way to view this time of data and narrow down the results is to use a decision tree model. 
+
+```{r}
+set.seed(123)
+bank_rand <- bank[order(runif(40000)), ] 
+bank_train <- bank_rand[1:32000, ] #Training data set; 32000 observations
+bank_test  <-bank_rand[32001:40000, ]
+```
+
+Above I am splitting the data set into a training set and a validation set. The training set will be used to train the model and the validation set will be used to run through the model to evaluate the performance of it.
+
+## Summary of the Decision Tree
+```{r}
+library(rpart)
+set.seed(123)
+bank_rpart <- rpart(bank_train$y..category~., method="class", parms = list(split="gini"), data=bank_train)
+#summary(bank_rpart) - the summary results are long, decision trees are better visualized
+
+```
+
+##Plot of the Decision Tree
+
+```{r}
+library(rpart.plot)
+rpart.plot(bank_rpart, type=0, extra=101)
+rpart.plot(bank_rpart, type=1, extra=101)
+
+library(party)
+library(partykit)
+bank_party<-as.party(bank_rpart)
+plot(bank_party)
+
+cptable<-printcp(bank_rpart)
+cptable
+plotcp(bank_rpart, minline=TRUE, col="red") 
+```
+The decision tree above has identified the below variables as being predictors of people who subscribe to term deposits:
+- Duration of the previous time the customer was contacted
+- The month of the contact
+- The type of contact that was made (telephone, unknown, or cellular)
+
+## Training Set to Predict Model Accuracy
+
+I will now use this model with my training set of data to determine the model accuracy. 
+
+```{r}
+library(caret)
+actual <- bank_test$y..category
+predicted <- predict(bank_rpart, bank_test, type="class")
+results.matrix <- confusionMatrix(predicted, actual, positive="yes")
+print(results.matrix)
+```
+
+The model accuracy is 93% but the ability to predict the clients that subscribed is only 27%. I am going to try to prune the tree and see if I can get better results.
+
+##Pruned Decision Tree
+
+```{r}
+Pruned_bank_rpart <- prune(bank_rpart, cp=0.024)
+
+rpart.plot(Pruned_bank_rpart, type=0, extra=101)
+```
+
+The pruned tree shows that the only variable that is significant is the duration of the previous contact made with the customer. I would like to test if our ability to predict customers who subscribe to term deposits has increased.
+
+```{r}
+actual <- bank_test$y..category
+predicted <- predict(Pruned_bank_rpart, bank_test, type="class")
+pruned_results.matrix <- confusionMatrix(predicted, actual, positive="yes")
+print(pruned_results.matrix)
+```
+
+Our ability to predict customers that subscribed to term deposits has increased but only to 31%. I'd like to get this a bit higher so I am going to try another decision tree using the information gain approach.
+
+## Using Information Gain Method
+```{r}
+bank_infogain <- rpart(bank_train$y..category~., method="class", parms = list(split="information"), data=bank_train)
+summary(bank_infogain)
+bank_infogain_party<-as.party(bank_infogain)
+plot(bank_infogain_party)
+
+#Prune the Tree
+cptable<-printcp(bank_infogain)
+cptable
+plotcp(bank_infogain, minline=TRUE, col="red") 
+```
+```{r}
+
+Pruned_bank_infogain <- prune(bank_infogain, cp=0.021) 
+#summary(Pruned_bank_infogain)
+rpart.plot(Pruned_bank_infogain, type=0, extra=101)
+rpart.plot(Pruned_bank_infogain, type=1, extra=101)
+Pruned_bank_party<-as.party(Pruned_bank_infogain)
+plot(Pruned_bank_party)
+
+```
+Similarly the decision tree using information gain found that the duration of the previous contact to the customer is the most significant predictor.
+
+## Confusion Matrix for the Info Gain Decision Tree
+```{r}
+actual_info <- bank_test$y..category
+predicted_info <- predict(bank_infogain, bank_test, type="class")
+results.matrix_info <- confusionMatrix(predicted_info, actual_info, positive="yes")
+print(results.matrix_info)
+```
+The model is still only able to predict 24% of the customers that subscribe to term deposits.
+
+#Pruned Model Accuracy
+```{r}
+actual_info_pruned <- bank_test$y..category
+predicted_info_pruned <- predict(Pruned_bank_infogain, bank_test, type="class")
+pruned_results.matrix_info <- confusionMatrix(predicted_info_pruned, actual_info_pruned, positive="yes")
+print(pruned_results.matrix_info)
+```
+
+Similar to the last tree using the Gini index, the ability to predict customers that subscribe to term deposits is 31%. The most important variable in this prediction is the duration of the previous call to the customer. 
+
+
+### Using the Caret Package to Train & Validate Models
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(bank$y..category, p = .8,list = FALSE,times = 1)
+bank_train_caret <- bank[ trainIndex,]
+bank_validate_caret <- bank[ -trainIndex,]
+
+```
+
+```{r}
+
+bank_rpart_caret <- rpart(y..category~., method="class", parms = list(split="gini"), data=bank_train_caret)
+
+plot(bank_rpart_caret, uniform=TRUE, main="Classification Tree for Term Deposit Subscribers")
+text(bank_rpart_caret, use.n=TRUE, all=TRUE, cex=0.8)
+
+rpart.plot(bank_rpart_caret, type=0, extra=101)
+rpart.plot(bank_rpart_caret, type=1, extra=101)
+
+actual <- bank_validate_caret$y..category
+predicted <- predict(bank_rpart_caret, bank_validate_caret, type="class")
+results.matrix.caret <- confusionMatrix(predicted, actual, positive="yes")
+print(results.matrix.caret)
+```
+
+Reading the decision tree above starting with the top node we have the length of the previous contact to the customer. If the contact was less than 518 minutes you go to the left where the next variable shows to be the outcome of the previous marketing campaign. If the outcome was anything but a success than 86% of the customers did not subscribe but 1,818 of them did subscribe. If the previous marketing campaign was a success and the duration of the contact was less than 162 minutes, then 196 of the customers did not subscribe and and 90 did subscribe. Going down this same node, if the call was greater than 162 minutes than 196 customers subscribed and 543 customers did not subscribe. Going back to the top, if the duration of the previous contact was greater than 518 minutes but less than 800 minutes and the outcome of the previous campaign was a success, 804 of the customers subscribed. If the previous campaign was anything but a success then 19 customers subscribed. Finally, if the duration of the previous contact was greater than 518 minutes and less than 800 minutes 4% of the customers subscribed (653 customers).
+
+The model does a better job at predicting customers that have not subscribed to a term deposit, 97% while it only predicts customers that do subscribe 36% of the time.
+
+## Increasing Model Performance - Random Forest
+
+I would like to try one more method called a Random forect. Random forests consider a subset of the characteristics of the customers at each split. This means the node splits are not dominated by one or a few strong predictors and gives less strong predictors more chances to be used. The average of each of the trees is then taken to produce a model that isn't dominated by only a couple strong customer traits.
+
+
+
+```{r}
+#install.packages("randomForest")
+library(randomForest)
+bank.RForest <- randomForest(y..category ~.,data=bank_train_caret, mtry=3, ntree=500,na.action = na.omit, importance=TRUE) #default to try three predictors at a time and create 500 trees. 
+print(bank.RForest) 
+importance(bank.RForest) 
+varImpPlot(bank.RForest) 
+
+actual <- bank_validate_caret$y..category
+bank_predicted <- predict(bank.RForest, newdata=bank_validate_caret, type="class") 
+bank_results.matrix.rf <- confusionMatrix(bank_predicted, actual, positive="yes") 
+print(bank_results.matrix.rf)
+```
+The random forest created 500 decision trees to determine what variables predict customers subscribing to term deposits. Similar to the decision tree in the last example, duration number is the variable that is the greatest predictor of customers subscribing to term deposits. The variable showing to be the next most important is the month the customer was contacted. This random forest model is 91% accurate in predicting customers that do and do not subscribe to term deposits. It is correct 45% of the time when looking for customers that subscribed and is correct 97% of the time predicting customers that did not subscribe.
+
+##Recommendation
+
+Both decision trees and the random forest method show that the duration of the previous contact to the customer is the most predictive of customers that subscribed to term deposits. This could be due to the fact that the more time you have the client on the call, the more details that can be given about term deposits. The first thing for Homebank to target is keeping the customers on the phone for at least 518 minutes. The logistic regression model found that the most important predictor of customer's subscribing to a term deposit was the outcome of the prior marketing campaign. If the outcome of the prior marketing campaign was a success than customers were 10 times more likely to subscribe to a term deposit. Hometown Bank should create focused marketing campaigns about term deposits in order to educate their customers on the benefits of them and then follow this up by contacting their customers afterward.
